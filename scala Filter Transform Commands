@@ -1,0 +1,44 @@
+
+val df = spark.read.json("/home/rg/Project/eno.json")
+
+val df1 =  df.withColumn("Client_entropy",col("session.client_entropy"))
+
+val df2 = df1.withColumn("Server_entropy",col("session.server_entropy")).withColumn("ports",col("transport.ports"))
+
+val df3 =  df2.withColumn("protocol",col("transport.protocol")).withColumn("ssl_client_cipher_suites",col("payload.ssl_client_cipher_suites"))
+
+val df3 =  df2.withColumn("network",col("network")).withColumn("has_content",col("has_content"))
+
+val df4 =  df3.withColumn("arp_headers",col("payload.arp_headers")).withColumn("client_average_interarrival_time",col("session.client_average_interarrival_time"))
+
+
+val df8 = df7.drop("datalink")
+
+df10.write.json("/home/rg/Project/sample001.json")
+
+
+df.write.format("parquet").save("home/rg/project/demo.parquet")
+
+
+val df4 = df3.withColumn("client_server",struct((col("server_entropy")),(col("client_average_interarrival_time"))))
+
+val df3 = df2.withColumn("label", lit("0"))
+
+
+import org.apache.spark.ml.feature.FeatureHasher
+import org.apache.spark.ml.PipelineStage
+import org.apache.spark.ml.Transformer
+
+val hasher = new FeatureHasher().setInputCols("Client_entropy", "Server_entropy").setOutputCol("features")
+
+val featurized = hasher.transform(df2)
+
+featurized.show()
+
+val df3 = featurized.withColumn("label", lit(0.0)).drop("Client_entropy", "Server_entropy")
+
+import org.apache.spark.mllib.util.MLUtils
+
+val convertedVecDF = MLUtils.convertVectorColumnsToML(df2)
+
+convertedVecDF.write.format("libsvm").save("/home/rg/Project/checkthisout")
