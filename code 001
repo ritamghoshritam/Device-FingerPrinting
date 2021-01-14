@@ -1,0 +1,79 @@
+
+--------------------------------BASIC FILTERS -------------------------------------------------------------------------------------------------
+
+val df_main = df.filter(col("session.client_bi_dir_pkt_arrival_gaps")isNotNull)
+
+
+
+--------------------------- UDF USED TO GENERATE UNIDIRECTIONAL PACKET ARRIVAL GAP WITH ONLY CONSECUTIVE PACKETS FROM CLIENT ------------------
+
+def gap_udf(bi_dir: Seq[Double], flow: Seq[Long]): Seq[Double]={
+	var count = 0L
+	var ret = Seq[Double]()
+	for(i <- 0 to flow.size-1){
+		val a = "0000000000000000" + flow(i).toBinaryString takeRight 16
+		val b = a.reverse
+		for(j <- 0 to 15){
+			val counter = 16*i + j
+			if(counter < bi_dir.size){
+				if( j == 15  &&  i != flow.size-1 ){
+					val a_next = "0000000000000000" + flow(i+1).toBinaryString takeRight 16
+					val b_next = a_next.reverse
+					if(b(15) == '0' && b_next(0) == '0'){
+						ret = ret :+ bi_dir(counter)
+					}
+				}
+				else if(j<15){
+					if(b(j) == '0' && b(j+1) == '0'){
+						ret = ret :+ bi_dir(counter)
+					}
+				}
+			}
+		}
+	}
+	ret
+}
+
+val generate_gap = udf((bi_dir: Seq[Double], flow: Seq[Long]) => gap_udf(bi_dir, flow))
+
+
+val df_with_ml_gap = df_main.withColumn("client_uni_dir_ml_packet_arrival_gaps", generate_gap( col("session.client_bi_dir_pkt_arrival_gaps"), col("session.flow_direction")  ))
+
+------------------------------------------- MERGING RECORDS IN A TIMEFRAME ------------------------------------------------------------------
+
+val trackingIds = flatten(collect_list($"trackingIds")).alias("trackingIds")
+
+df.groupBy($"visitorId").agg(trackingIds, emailIds)
+
+----------------------------------------------------BUCKETING UDF ----------------------------------------------------------------------------
+a is dataframe with col - src_ip & client_uni_dir_ml_packet_arrival_gaps: Seq[Double]
+
+df b = a.withColumn("min", array_min(col("array"))).withColumn("max", array_max(col("array")))
+
+val min_max =df.agg(min("min"), max("max")).head()
+val global_min = min_max(0)
+val global_max = min_max(1)
+
+val c = b.drop("min", "max")
+val d = c.withColumn("min", lit(global_min)).withColumn("max", lit(global_max))
+
+aab d pe udf over column client_uni_dir_ml_packet_arrival_gap, min, max. 
+
+def bucketing_udf(gap_seq: Seq[Double], min: Double, max:Double): Seq[Int]={
+	val no_bins =300
+	val width_temp = ((max - min )/ no_bins)
+	val width = math.ceil(width_temp).toInt
+	var freq_arr = Array.fill[Int](no_bins)(0)
+	for(j <- 0 to gap_seq.size-1){
+		freq_arr(  ((gap_seq(j)-min)/width).toInt ) = freq_arr(  ((gap_seq(j)-min)/width).toInt )  + 1
+	}
+	freq_arr
+}
+
+val generate_bucketing = udf((gap_seq: Seq[Double], min: Double, max: Double) => bucketing_udf(gap_seq, min, max))
+
+val e = d.withColumn("feature", generate_bucketing(col("client_uni_dir_ml_packet_arrival_gap"), col("min"), col("max")  ))
+
+aab e dataframe hai jismein feature feature array hai and lable src_ip hai 
+
+isme ML svm and naive bayes laga ke accuracy bata
